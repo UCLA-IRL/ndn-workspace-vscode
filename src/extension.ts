@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
 import { MemFS } from './fileSystemProvider';
+import { base64ToBytes } from '@ucla-irl/ndnts-aux/utils';
+import { Decoder } from '@ndn/tlv';
+import { Data } from '@ndn/packet';
+import { Certificate } from '@ndn/keychain';
+import { SafeBag } from '@ndn/ndnsec';
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('MemFS says "Hello"');
@@ -39,6 +44,21 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
       initialized = true;
+
+      const config = vscode.workspace.getConfiguration('memfs');
+      const trustAnchorB64 = config.get<string>('trustAnchor');
+      const safeBagB64 = config.get<string>('safeBag');
+      const passCode = config.get<string>('passCode');
+      if (trustAnchorB64) {
+        const cert = decodeCert(trustAnchorB64);
+        console.log(`Trust Anchor: ${cert.name.toString()}`);
+      }
+      if (safeBagB64 && passCode) {
+        (async () => {
+          const { cert } = await decodeSafebag(safeBagB64, passCode);
+          console.log(`My Cert: ${cert.name.toString()}`);
+        })();
+      }
 
       // most common files types
       memFs.writeFile(vscode.Uri.parse(`memfs:/file.txt`), Buffer.from('foo'), { create: true, overwrite: true });
@@ -146,3 +166,18 @@ function randomData(lineCnt: number, lineLen = 155): Buffer {
   }
   return Buffer.from(lines.join('\n'), 'utf8');
 }
+
+const decodeCert = (b64Value: string) => {
+  const wire = base64ToBytes(b64Value);
+  const data = Decoder.decode(wire, Data);
+  const cert = Certificate.fromData(data);
+  return cert;
+};
+
+const decodeSafebag = async (b64Value: string, passcode: string) => {
+  const wire = base64ToBytes(b64Value);
+  const safebag = Decoder.decode(wire, SafeBag);
+  const cert = safebag.certificate;
+  const prvKey = await safebag.decryptKey(passcode);
+  return { cert, prvKey };
+};
