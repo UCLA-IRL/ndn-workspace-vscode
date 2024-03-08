@@ -10,77 +10,59 @@
     "Other"
   ],
   "activationEvents": [
-    "onFileSystem:memfs"
+    "onFileSystem:ndnws"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "memfs.workspaceInit",
+        "command": "ndnws.workspaceInit",
         "title": "Setup Workspace",
-        "category": "MemFS"
+        "category": "NDN Workspace"
       },
       {
-        "command": "memfs.init",
-        "title": "Create Files",
-        "category": "MemFS"
+        "command": "ndnws.init",
+        "title": "Connect to workspace",
+        "category": "NDN Workspace"
       },
       {
-        "command": "memfs.reset",
-        "title": "Delete Files",
-        "category": "MemFS"
-      },
-      {
-        "command": "memfs.deleteFile",
-        "title": "Delete \"file.txt\"",
-        "category": "MemFS"
-      },
-      {
-        "command": "memfs.addFile",
-        "title": "Add \"file.txt\"",
-        "category": "MemFS"
+        "command": "ndnws.reset",
+        "title": "Disconnect to workspace",
+        "category": "NDN Workspace"
       }
     ],
     "menus": {
       "commandPalette": [
         {
-          "command": "memfs.init",
+          "command": "ndnws.init",
           "when": "workbenchState == workspace"
         },
         {
-          "command": "memfs.reset",
+          "command": "ndnws.reset",
           "when": "workbenchState == workspace"
         },
         {
-          "command": "memfs.deleteFile",
-          "when": "workbenchState == workspace"
-        },
-        {
-          "command": "memfs.addFile",
-          "when": "workbenchState == workspace"
-        },
-        {
-          "command": "memfs.workspaceInit",
+          "command": "ndnws.workspaceInit",
           "when": "workbenchState != workspace"
         }
       ]
     },
     "configuration": {
-      "title": "MemFS",
+      "title": "NDN Workspace",
       "properties": {
-        "memfs.trustAnchor": {
+        "ndnws.trustAnchor": {
           "type": "string",
           "default": "",
           "description": "The trust anchor in base64.",
           "editPresentation": "multilineText"
         },
-        "memfs.safeBag": {
+        "ndnws.safeBag": {
           "type": "string",
           "default": "",
           "description": "The local node's safebag in base64.",
           "editPresentation": "multilineText"
         },
-        "memfs.passCode": {
+        "ndnws.passCode": {
           "type": "string",
           "default": "",
           "description": "The safebag's passcode"
@@ -115,6 +97,7 @@
     "@ndn/tlv": "https://ndnts-nightly.ndn.today/tlv.tgz",
     "@ndn/util": "https://ndnts-nightly.ndn.today/util.tgz",
     "@ndn/ws-transport": "https://ndnts-nightly.ndn.today/ws-transport.tgz",
+    "@syncedstore/core": "^0.6.0",
     "@types/mocha": "^10.0.6",
     "@types/node": "~18.19.22",
     "@types/vscode": "^1.87.0",
@@ -127,6 +110,7 @@
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.1.3",
-    "typescript": "^5.4.2"
+    "typescript": "^5.4.2",
+    "yjs": "^13.6.14"
   }
 }

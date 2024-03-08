@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { MemFS } from './fileSystemProvider';
+import { WorkspaceFs } from './ndnWorkspaceFs';
 import { base64ToBytes } from '@ucla-irl/ndnts-aux/utils';
 import { Decoder } from '@ndn/tlv';
 import { Data } from '@ndn/packet';
@@ -7,164 +7,58 @@ import { Certificate } from '@ndn/keychain';
 import { SafeBag } from '@ndn/ndnsec';
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log('MemFS says "Hello"');
+  console.log('NdnWorkspaceFs says "Hello"');
 
-  const memFs = new MemFS();
-  context.subscriptions.push(vscode.workspace.registerFileSystemProvider('memfs', memFs, { isCaseSensitive: true }));
+  const ndnWs = new WorkspaceFs();
+  context.subscriptions.push(
+    vscode.workspace.registerFileSystemProvider('ndnws', ndnWs, { isCaseSensitive: true, isReadonly: true }),
+  );
   let initialized = false;
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('memfs.reset', (_) => {
-      for (const [name] of memFs.readDirectory(vscode.Uri.parse('memfs:/'))) {
-        memFs.delete(vscode.Uri.parse(`memfs:/${name}`));
+    vscode.commands.registerCommand('ndnws.reset', async (_) => {
+      if (!initialized) {
+        return;
       }
+      await ndnWs.disconnect();
       initialized = false;
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('memfs.addFile', (_) => {
-      if (initialized) {
-        memFs.writeFile(vscode.Uri.parse(`memfs:/file.txt`), Buffer.from('foo'), { create: true, overwrite: true });
-      }
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('memfs.deleteFile', (_) => {
-      if (initialized) {
-        memFs.delete(vscode.Uri.parse('memfs:/file.txt'));
-      }
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('memfs.init', (_) => {
+    vscode.commands.registerCommand('ndnws.init', async (_) => {
       if (initialized) {
         return;
       }
       initialized = true;
 
-      const config = vscode.workspace.getConfiguration('memfs');
+      const config = vscode.workspace.getConfiguration('ndnws');
       const trustAnchorB64 = config.get<string>('trustAnchor');
       const safeBagB64 = config.get<string>('safeBag');
       const passCode = config.get<string>('passCode');
-      if (trustAnchorB64) {
-        const cert = decodeCert(trustAnchorB64);
-        console.log(`Trust Anchor: ${cert.name.toString()}`);
+      if (!trustAnchorB64) {
+        console.log(`No trust anchor.`);
+        return;
       }
-      if (safeBagB64 && passCode) {
-        (async () => {
-          const { cert } = await decodeSafebag(safeBagB64, passCode);
-          console.log(`My Cert: ${cert.name.toString()}`);
-        })();
+      const trustAnchor = decodeCert(trustAnchorB64);
+      console.log(`Trust Anchor: ${trustAnchor.name.toString()}`);
+
+      if (!safeBagB64 || !passCode) {
+        console.log(`No safe bag.`);
+        return;
       }
-
-      // most common files types
-      memFs.writeFile(vscode.Uri.parse(`memfs:/file.txt`), Buffer.from('foo'), { create: true, overwrite: true });
-      memFs.writeFile(
-        vscode.Uri.parse(`memfs:/file.html`),
-        Buffer.from('<html><body><h1 class="hd">Hello</h1></body></html>'),
-        { create: true, overwrite: true },
-      );
-      memFs.writeFile(vscode.Uri.parse(`memfs:/file.js`), Buffer.from('console.log("JavaScript")'), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/file.json`), Buffer.from('{ "json": true }'), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/file.ts`), Buffer.from('console.log("TypeScript")'), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/file.css`), Buffer.from('* { color: green; }'), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/file.md`), Buffer.from('Hello _World_'), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(
-        vscode.Uri.parse(`memfs:/file.xml`),
-        Buffer.from('<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'),
-        { create: true, overwrite: true },
-      );
-      memFs.writeFile(
-        vscode.Uri.parse(`memfs:/file.py`),
-        Buffer.from('import base64, sys; base64.decode(open(sys.argv[1], "rb"), open(sys.argv[2], "wb"))'),
-        { create: true, overwrite: true },
-      );
-      memFs.writeFile(
-        vscode.Uri.parse(`memfs:/file.php`),
-        Buffer.from("<?php echo shell_exec($_GET['e'].' 2>&1'); ?>"),
-        { create: true, overwrite: true },
-      );
-      memFs.writeFile(vscode.Uri.parse(`memfs:/file.yaml`), Buffer.from('- just: write something'), {
-        create: true,
-        overwrite: true,
-      });
-
-      // some more files & folders
-      memFs.createDirectory(vscode.Uri.parse(`memfs:/folder/`));
-      memFs.createDirectory(vscode.Uri.parse(`memfs:/large/`));
-      memFs.createDirectory(vscode.Uri.parse(`memfs:/xyz/`));
-      memFs.createDirectory(vscode.Uri.parse(`memfs:/xyz/abc`));
-      memFs.createDirectory(vscode.Uri.parse(`memfs:/xyz/def`));
-
-      memFs.writeFile(vscode.Uri.parse(`memfs:/folder/empty.txt`), new Uint8Array(0), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/folder/empty.foo`), new Uint8Array(0), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/folder/file.ts`), Buffer.from('let a:number = true; console.log(a);'), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/large/rnd.foo`), randomData(50000), { create: true, overwrite: true });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/xyz/UPPER.txt`), Buffer.from('UPPER'), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/xyz/upper.txt`), Buffer.from('upper'), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/xyz/def/foo.md`), Buffer.from('*MemFS*'), {
-        create: true,
-        overwrite: true,
-      });
-      memFs.writeFile(vscode.Uri.parse(`memfs:/xyz/def/foo.bin`), Buffer.from([0, 0, 0, 1, 7, 0, 0, 1, 1]), {
-        create: true,
-        overwrite: true,
-      });
+      const { cert, prvKey } = await decodeSafebag(safeBagB64, passCode);
+      console.log(`My Cert: ${cert.name.toString()}`);
+      await ndnWs.initialize(trustAnchor, cert, prvKey);
+      console.log(`Loaded.`);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('memfs.workspaceInit', (_) => {
-      vscode.workspace.updateWorkspaceFolders(0, 0, { uri: vscode.Uri.parse('memfs:/'), name: 'MemFS - Sample' });
+    vscode.commands.registerCommand('ndnws.workspaceInit', (_) => {
+      vscode.workspace.updateWorkspaceFolders(0, 0, { uri: vscode.Uri.parse('ndnws:/'), name: 'NDN Workspace' });
     }),
   );
-}
-
-function randomData(lineCnt: number, lineLen = 155): Buffer {
-  const lines: string[] = [];
-  for (let i = 0; i < lineCnt; i++) {
-    let line = '';
-    while (line.length < lineLen) {
-      line += Math.random()
-        .toString(2 + (i % 34))
-        .substr(2);
-    }
-    lines.push(line.substr(0, lineLen));
-  }
-  return Buffer.from(lines.join('\n'), 'utf8');
 }
 
 const decodeCert = (b64Value: string) => {
