@@ -19,6 +19,22 @@ export type RootDocType = {
 };
 export type RootDocStore = ReturnType<typeof syncedStore<RootDocType>>;
 
+export type Cursor = {
+  anchor: Y.RelativePosition;
+  head: Y.RelativePosition;
+};
+
+export type AwarenessTag = {
+  name: string;
+  color: string;
+  colorLight: string;
+};
+
+export type AwarenessState = {
+  cursor?: Cursor;
+  user?: AwarenessTag;
+};
+
 export function initRootDoc(guid: string) {
   return syncedStore(
     {
@@ -33,6 +49,7 @@ export class WorkspaceFs implements vscode.FileSystemProvider {
   rootDoc?: RootDocStore;
   storage?: Storage;
   face?: FwFace;
+  onChangeTextObserver?: vscode.Disposable;
 
   // Used to prevent self motivated change resuting in deadloop
   disableLocalUpdates: boolean = false;
@@ -234,7 +251,7 @@ export class WorkspaceFs implements vscode.FileSystemProvider {
     yDoc.getMap('latex').observeDeep(async (events, transact) => {
       const toFire = [] as vscode.FileChangeEvent[];
 
-      if (transact.origin === this) {
+      if (transact.origin === this || transact.origin === 'local') {
         // Prevent self motivate
         return;
       }
@@ -263,10 +280,20 @@ export class WorkspaceFs implements vscode.FileSystemProvider {
             // Directory changed
             // See evt.changes.added / deleted
           } else if (evt instanceof Y.YTextEvent) {
+            // DEBUG: Show remote changes
+            // for (const delta of evt.changes.delta) {
+            //   if (delta.retain) {
+            //     console.log(`On: ${itemPath} Retain: ${delta.retain}`);
+            //   } else if (delta.delete) {
+            //     console.log(`On: ${itemPath} Delete: ${delta.delete}`);
+            //   } else if (delta.insert) {
+            //     console.log(`On: ${itemPath} Insert: ${delta.insert}`);
+            //   }
+            // }
+
             // Text changed
             const editor = vscode.window.visibleTextEditors.find((cur) => cur.document.uri.path === itemPath);
             const currentText = (this.rootDoc!.latex[itemId] as project.TextDoc).text.toString();
-            // TODO: Remove delete when dirty is not showing up
             this.disableLocalUpdates = true;
             await editor?.edit((builder) => {
               let position = 0;
@@ -301,8 +328,8 @@ export class WorkspaceFs implements vscode.FileSystemProvider {
       this._emitter.fire(toFire);
     });
 
-    // Listen to local windows
-    vscode.workspace.onDidChangeTextDocument((evt) => {
+    // Listen to local window editors
+    this.onChangeTextObserver = vscode.workspace.onDidChangeTextDocument((evt) => {
       if (evt.document.uri.scheme !== 'ndnws') {
         return;
       }
@@ -320,8 +347,13 @@ export class WorkspaceFs implements vscode.FileSystemProvider {
           for (const change of evt.contentChanges) {
             const { start, end } = change.range; // old positions
             const currentText = item.text.toString();
-            let startIndex = StringPositionCalculator.lineAndCharacterToIndex(currentText, start);
-            let endIndex = StringPositionCalculator.lineAndCharacterToIndex(currentText, end);
+            const startIndex = StringPositionCalculator.lineAndCharacterToIndex(currentText, start);
+            const endIndex = StringPositionCalculator.lineAndCharacterToIndex(currentText, end);
+            // Special case: when the remote is deleting a last character, the local VSCode will do whole text replace
+            // We want to skip that.
+            if (startIndex === 0 && endIndex === currentText.length && change.text === currentText) {
+              continue;
+            }
             if (endIndex > startIndex) {
               item.text.delete(startIndex, endIndex - startIndex);
             }
@@ -331,12 +363,64 @@ export class WorkspaceFs implements vscode.FileSystemProvider {
           }
         }, this);
       }
-      evt.document.save();
+      evt.document.save(); // Force save the document (noop) to avoid dirty issue
     });
     // vscode.workspace.onDidOpenTextDocument((evt) => {
     //   // console.log(evt.uri);
     // });
     // vscode.workspace.onDidCloseTextDocument((evt) => {});
+
+    // Set remote awareness callback
+    // Not currently working
+    // vscode.window.onDidChangeActiveTextEditor((editor) => {
+    //   if (!this.workspace) {
+    //     return;
+    //   }
+    //   if (!editor) {
+    //     this.workspace.yjsAdaptor.cancelAwareness();
+    //     return;
+    //   }
+    //   const parts = editor.document.uri.path.split('/').slice(1);
+    //   const itemId = project.itemIdAt(this.rootDoc!.latex, parts);
+    //   if (!itemId) {
+    //     this.workspace.yjsAdaptor.cancelAwareness();
+    //     return;
+    //   }
+    //   const item = this.rootDoc!.latex[itemId];
+    //   if (item?.kind !== 'text') {
+    //     this.workspace.yjsAdaptor.cancelAwareness();
+    //     return;
+    //   }
+    //   this.workspace.yjsAdaptor.bindAwareness(item.text.doc!, itemId);
+    //   this.workspace.yjsAdaptor.awareness?.on(
+    //     'change',
+    //     (added: number[], updated: number[], removed: number[], origin: unknown) => {
+    //       const states = this.workspace?.yjsAdaptor.awareness?.getStates() as Map<number, AwarenessState> | undefined;
+    //       if (!states) {
+    //         return;
+    //       }
+    //       for (const state of states.values()) {
+    //         // console.log(state);
+    //         if (state.cursor && state.user) {
+    //           const anchor = Y.createAbsolutePositionFromRelativePosition(state.cursor.anchor, item.text.doc!)?.index;
+    //           const head = Y.createAbsolutePositionFromRelativePosition(state.cursor.head, item.text.doc!)?.index;
+    //           if (anchor && head) {
+    //             const currentText = item.text.toString();
+    //             editor.setDecorations({ key: state.user.name, dispose() {} }, [
+    //               {
+    //                 range: new vscode.Range(
+    //                   StringPositionCalculator.indexToLineAndCharacter(currentText, anchor),
+    //                   StringPositionCalculator.indexToLineAndCharacter(currentText, head),
+    //                 ),
+    //                 hoverMessage: state.user.name,
+    //               },
+    //             ]);
+    //           }
+    //         }
+    //       }
+    //     },
+    //   );
+    // });
 
     this.workspace.fireUpdate();
   }
@@ -344,6 +428,8 @@ export class WorkspaceFs implements vscode.FileSystemProvider {
   constructor() {}
 
   async disconnect() {
+    // TODO: Close relative windows.
+    this.onChangeTextObserver?.dispose();
     await this.workspace?.destroy();
     this.workspace = undefined;
     if (this.rootDoc !== undefined) {
