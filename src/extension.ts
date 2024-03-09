@@ -11,7 +11,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const ndnWs = new WorkspaceFs();
   context.subscriptions.push(
-    vscode.workspace.registerFileSystemProvider('ndnws', ndnWs, { isCaseSensitive: true, isReadonly: true }),
+    vscode.workspace.registerFileSystemProvider('ndnws', ndnWs, { isCaseSensitive: true, isReadonly: false }),
   );
   let initialized = false;
 
